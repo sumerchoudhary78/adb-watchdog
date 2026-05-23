@@ -82,20 +82,25 @@ class WatchdogAccessibilityService : AccessibilityService() {
             )
         }
 
-        // Wait for the developer-options screen to materialize.
-        var wirelessNode: AccessibilityNodeInfo? = null
-        repeat(25) { // up to ~5s
-            delay(200)
-            wirelessNode = findWirelessDebuggingRow()
-            if (wirelessNode != null) return@repeat
+        // Wait for the developer-options screen to materialize, with early exit when found.
+        var wirelessNode: AccessibilityNodeInfo? = waitForNode(timeoutMs = 5000)
+
+        // If still not found, the row is below the fold. Scroll the list and keep looking.
+        if (wirelessNode == null) {
+            Log.i(TAG, "Row not visible — scrolling to find it")
+            wirelessNode = scrollAndFind(maxScrolls = 25)
         }
 
         val target = wirelessNode
         if (target == null) {
-            Log.w(TAG, "Could not find 'Wireless debugging' row")
+            Log.w(TAG, "Could not find 'Wireless debugging' row after scrolling")
             performGlobalAction(GLOBAL_ACTION_HOME)
             return
         }
+
+        // Bring it fully on-screen before tapping (in case it's only partially visible).
+        target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+        delay(150)
 
         // Click the toggle. Prefer the Switch sibling if present; else click the row.
         val clickable = findClickableSwitchNear(target) ?: target
@@ -110,10 +115,51 @@ class WatchdogAccessibilityService : AccessibilityService() {
         performGlobalAction(GLOBAL_ACTION_HOME)
     }
 
+    private suspend fun waitForNode(timeoutMs: Long, intervalMs: Long = 200): AccessibilityNodeInfo? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            findWirelessDebuggingRow()?.let { return it }
+            delay(intervalMs)
+        }
+        return null
+    }
+
+    private suspend fun scrollAndFind(maxScrolls: Int): AccessibilityNodeInfo? {
+        repeat(maxScrolls) {
+            val scrollable = findScrollableContainer()
+            if (scrollable == null) {
+                Log.w(TAG, "No scrollable container found")
+                return null
+            }
+            val scrolled = scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            if (!scrolled) {
+                Log.i(TAG, "Reached end of list without finding row")
+                return null
+            }
+            delay(350) // let the list settle and new rows render
+            findWirelessDebuggingRow()?.let { return it }
+        }
+        return null
+    }
+
     private fun findWirelessDebuggingRow(): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
-        val candidates = LABELS.flatMap { root.findAccessibilityNodeInfosByText(it).orEmpty() }
-        return candidates.firstOrNull()
+        return LABELS.flatMap { root.findAccessibilityNodeInfosByText(it).orEmpty() }.firstOrNull()
+    }
+
+    private fun findScrollableContainer(): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        // BFS — the scrollable list container is usually near the root, deeper than tab strips.
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isScrollable) return node
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.add(it) }
+            }
+        }
+        return null
     }
 
     private fun findClickableSwitchNear(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
