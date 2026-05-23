@@ -1,14 +1,17 @@
 package com.luffy.adbwatchdog
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.GestureDescription
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Path
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -125,41 +128,70 @@ class WatchdogAccessibilityService : AccessibilityService() {
     }
 
     private suspend fun scrollAndFind(maxScrolls: Int): AccessibilityNodeInfo? {
-        repeat(maxScrolls) {
-            val scrollable = findScrollableContainer()
-            if (scrollable == null) {
-                Log.w(TAG, "No scrollable container found")
+        // dispatchGesture-based swipe instead of ACTION_SCROLL_FORWARD: on ColorOS the
+        // scrollable node refuses the programmatic action even when the list clearly
+        // has more rows below the fold. A synthetic swipe goes through the regular
+        // touch pipeline and works regardless of which node owns the scroll behaviour.
+        var lastSnapshot: List<String> = emptyList()
+        repeat(maxScrolls) { i ->
+            val snapshot = collectVisibleText()
+            if (snapshot == lastSnapshot && lastSnapshot.isNotEmpty()) {
+                Log.i(TAG, "Screen content did not change after swipe — assuming end of list")
                 return null
             }
-            val scrolled = scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-            if (!scrolled) {
-                Log.i(TAG, "Reached end of list without finding row")
+            lastSnapshot = snapshot
+
+            val ok = swipeUp()
+            if (!ok) {
+                Log.w(TAG, "Gesture dispatch failed or was cancelled at iteration $i")
                 return null
             }
-            delay(350) // let the list settle and new rows render
+            delay(450) // let the list settle and new rows render
             findWirelessDebuggingRow()?.let { return it }
         }
+        Log.w(TAG, "Exhausted $maxScrolls swipes without finding the row")
         return null
+    }
+
+    private suspend fun swipeUp(): Boolean {
+        val dm = resources.displayMetrics
+        val centerX = dm.widthPixels / 2f
+        val startY = dm.heightPixels * 0.75f
+        val endY = dm.heightPixels * 0.30f
+        val path = Path().apply {
+            moveTo(centerX, startY)
+            lineTo(centerX, endY)
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 280L))
+            .build()
+        val done = CompletableDeferred<Boolean>()
+        val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(g: GestureDescription?) { done.complete(true) }
+            override fun onCancelled(g: GestureDescription?) { done.complete(false) }
+        }, null)
+        if (!dispatched) done.complete(false)
+        return done.await()
+    }
+
+    private fun collectVisibleText(): List<String> {
+        val root = rootInActiveWindow ?: return emptyList()
+        val out = mutableListOf<String>()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            node.text?.toString()?.takeIf { it.isNotBlank() }?.let { out.add(it) }
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.add(it) }
+            }
+        }
+        return out
     }
 
     private fun findWirelessDebuggingRow(): AccessibilityNodeInfo? {
         val root = rootInActiveWindow ?: return null
         return LABELS.flatMap { root.findAccessibilityNodeInfosByText(it).orEmpty() }.firstOrNull()
-    }
-
-    private fun findScrollableContainer(): AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
-        // BFS — the scrollable list container is usually near the root, deeper than tab strips.
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        queue.add(root)
-        while (queue.isNotEmpty()) {
-            val node = queue.removeFirst()
-            if (node.isScrollable) return node
-            for (i in 0 until node.childCount) {
-                node.getChild(i)?.let { queue.add(it) }
-            }
-        }
-        return null
     }
 
     private fun findClickableSwitchNear(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
