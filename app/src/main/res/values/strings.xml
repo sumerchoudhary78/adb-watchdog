@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ADB Watchdog</string>
+    <string name="a11y_description">Re-enables wireless debugging via the Settings UI when the secure-settings flag is not honored.</string>
+    <string name="a11y_summary">UI fallback recovery for wireless ADB</string>
+</resources>
