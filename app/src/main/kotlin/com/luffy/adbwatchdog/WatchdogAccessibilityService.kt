@@ -2,11 +2,14 @@ package com.luffy.adbwatchdog
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Path
+import android.graphics.Rect
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -69,9 +72,18 @@ class WatchdogAccessibilityService : AccessibilityService() {
     private suspend fun runRecovery() {
         Log.i(TAG, "Starting UI recovery")
 
-        // Make sure we're not on lockscreen; on a swipe-only phone HOME dismisses keyguard.
-        performGlobalAction(GLOBAL_ACTION_HOME)
-        delay(400)
+        val wakeLock = wakeScreenIfOff()
+        try {
+            dismissSwipeKeyguardIfNeeded()
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            delay(500)
+            runRecoveryInner()
+        } finally {
+            runCatching { wakeLock?.release() }
+        }
+    }
+
+    private suspend fun runRecoveryInner() {
 
         // Direct intent to Developer Options. Falls back to general Settings if unavailable.
         val devIntent = Intent("android.settings.APPLICATION_DEVELOPMENT_SETTINGS")
@@ -103,19 +115,51 @@ class WatchdogAccessibilityService : AccessibilityService() {
 
         // Bring it fully on-screen before tapping (in case it's only partially visible).
         target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
-        delay(150)
+        delay(250)
 
-        // Click the toggle. Prefer the Switch sibling if present; else click the row.
-        val clickable = findClickableSwitchNear(target) ?: target
-        val ok = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-        Log.i(TAG, "Toggle click dispatched: $ok")
+        // Two shapes of this UI in the wild:
+        //   A) AOSP/Pixel: the row carries an inline Switch — click it directly.
+        //   B) Realme/ColorOS (and most A12+ ROMs): the row is a navigation entry that
+        //      opens a sub-screen titled "Wireless debugging" with the real toggle inside.
+        val inlineSwitch = findClickableSwitchNear(target)
+        if (inlineSwitch != null) {
+            val ok = inlineSwitch.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            Log.i(TAG, "Inline switch click dispatched: $ok")
+        } else {
+            val rowClicked = clickRow(target)
+            Log.i(TAG, "Row clicked to open detail screen: $rowClicked")
+            delay(1200) // navigation + page render; long enough to screenshot
+            val detailSwitch = waitForAnySwitch(timeoutMs = 4000)
+            if (detailSwitch != null) {
+                val rect = Rect()
+                detailSwitch.getBoundsInScreen(rect)
+                Log.i(TAG, "Detail switch found at ${rect.flattenToString()} clickable=${detailSwitch.isClickable}")
+                val ok = clickRow(detailSwitch)
+                Log.i(TAG, "Detail switch click dispatched: $ok")
+            } else {
+                Log.w(TAG, "No Switch found on detail screen")
+            }
+        }
 
         // Some ROMs prompt "Allow wireless debugging on this network?" — accept it.
-        delay(700)
+        delay(1200)
         confirmDialogIfPresent()
 
-        delay(800)
+        delay(1000)
         performGlobalAction(GLOBAL_ACTION_HOME)
+    }
+
+    private suspend fun waitForAnySwitch(timeoutMs: Long, intervalMs: Long = 200): AccessibilityNodeInfo? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val root = rootInActiveWindow
+            val sw = root?.findDescendant { n ->
+                n.className?.toString()?.contains("Switch", ignoreCase = true) == true
+            }
+            if (sw != null) return sw
+            delay(intervalMs)
+        }
+        return null
     }
 
     private suspend fun waitForNode(timeoutMs: Long, intervalMs: Long = 200): AccessibilityNodeInfo? {
@@ -194,13 +238,101 @@ class WatchdogAccessibilityService : AccessibilityService() {
         return LABELS.flatMap { root.findAccessibilityNodeInfosByText(it).orEmpty() }.firstOrNull()
     }
 
+    private suspend fun clickRow(target: AccessibilityNodeInfo): Boolean {
+        findClickableSwitchNear(target)?.let { switch ->
+            if (switch.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+        }
+        var ancestor: AccessibilityNodeInfo? = target
+        repeat(6) {
+            val cur = ancestor ?: return@repeat
+            if (cur.isClickable && cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            ancestor = cur.parent
+        }
+        val rect = Rect()
+        target.getBoundsInScreen(rect)
+        if (rect.width() == 0 || rect.height() == 0) {
+            Log.w(TAG, "Row bounds empty — cannot tap")
+            return false
+        }
+        Log.i(TAG, "Falling back to gesture tap at (${rect.centerX()}, ${rect.centerY()})")
+        return tapAt(rect.centerX().toFloat(), rect.centerY().toFloat())
+    }
+
+    private fun wakeScreenIfOff(): PowerManager.WakeLock? {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isInteractive) {
+            Log.i(TAG, "Screen already on")
+            return null
+        }
+        @Suppress("DEPRECATION") // FULL_WAKE_LOCK is deprecated but is the only flag that actually turns the screen on from a service.
+        val wl = pm.newWakeLock(
+            PowerManager.FULL_WAKE_LOCK or
+                PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                PowerManager.ON_AFTER_RELEASE,
+            "AdbWatchdog:recovery"
+        )
+        wl.acquire(20_000L)
+        Log.i(TAG, "Wake lock acquired — screen woken")
+        return wl
+    }
+
+    private suspend fun dismissSwipeKeyguardIfNeeded() {
+        val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        if (!km.isKeyguardLocked) return
+        if (km.isKeyguardSecure) {
+            // PIN/pattern/password — we cannot unlock without the user. Recovery will likely fail.
+            Log.w(TAG, "Secure keyguard active — toggle UI is inaccessible until user unlocks")
+            return
+        }
+        Log.i(TAG, "Swipe keyguard active — dispatching swipe-up to dismiss")
+        delay(500) // give the screen time to actually render after wake
+        val dm = resources.displayMetrics
+        val centerX = dm.widthPixels / 2f
+        val startY = dm.heightPixels * 0.90f
+        val endY = dm.heightPixels * 0.10f
+        val path = Path().apply { moveTo(centerX, startY); lineTo(centerX, endY) }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 300L))
+            .build()
+        val done = CompletableDeferred<Boolean>()
+        val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(g: GestureDescription?) { done.complete(true) }
+            override fun onCancelled(g: GestureDescription?) { done.complete(false) }
+        }, null)
+        if (!dispatched) done.complete(false)
+        done.await()
+        delay(700)
+        if (km.isKeyguardLocked) {
+            Log.w(TAG, "Keyguard still locked after swipe — Settings will be behind it")
+        } else {
+            Log.i(TAG, "Keyguard dismissed")
+        }
+    }
+
+    private suspend fun tapAt(x: Float, y: Float): Boolean {
+        val path = Path().apply {
+            moveTo(x, y)
+            lineTo(x + 1f, y)
+        }
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0L, 60L))
+            .build()
+        val done = CompletableDeferred<Boolean>()
+        val dispatched = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(g: GestureDescription?) { done.complete(true) }
+            override fun onCancelled(g: GestureDescription?) { done.complete(false) }
+        }, null)
+        if (!dispatched) done.complete(false)
+        return done.await()
+    }
+
     private fun findClickableSwitchNear(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        // Walk up to a list-row ancestor, then find a Switch descendant.
+        // Walk up to a list-row ancestor, then find a clickable Switch descendant.
         var ancestor: AccessibilityNodeInfo? = node
         repeat(4) {
             ancestor = ancestor?.parent ?: return@repeat
             val switch = ancestor?.findDescendant { n ->
-                n.className?.toString()?.contains("Switch", ignoreCase = true) == true
+                n.className?.toString()?.contains("Switch", ignoreCase = true) == true && n.isClickable
             }
             if (switch != null) return switch
         }
