@@ -50,19 +50,20 @@ the Settings UI when that write is not honored.
 - **Bilingual UI** (中文 / English), persisted
 - **Grant helper** — the adb command is tap-to-copy; the accessibility entry
   appears only while not granted
-- **Fixed signing** — same-signature builds can be installed over the top,
-  keeping the granted permission
+- **Private release signing** — release keys are stored in Actions secrets;
+  normal debug builds use a separate, locally generated debug key
 
 ## Download & install
 
 Grab `adb-watchdog-latest.apk` from the [latest release](../../releases/latest).
 
-- The APK is signed with a fixed key (certificate SHA-256
-  `778962e7efaaadbcf2b70f2208774626e304071f3c0b8bd520af7d20e3b21f70`);
-  each release note prints the actual digest — if it matches, install directly
-  over the previous version
-- Upgrading from an older **randomly-signed** build requires one uninstall, then
-  re-granting the permission
+- Release certificate SHA-256:
+  `71cabefdfb51c81a15e6f34c93390229d963242a1c1df35bafe885bc0feb8ca5`.
+  APKs already using this new key can be updated in place.
+- **Migration from any previous key, including the exposed fixed debug key:**
+  uninstall the old app first (removes app data), install the new release,
+  and grant the permission again. A matching fingerprint identifies this new
+  signing key; it does not make APKs signed with the old public key trustworthy.
 
 ## One-time setup
 
@@ -114,16 +115,33 @@ Grab `adb-watchdog-latest.apk` from the [latest release](../../releases/latest).
 
 ## Build
 
-Requires JDK 17 and Android SDK 34:
+Requires JDK 17 and Android SDK 34. For local development (debug key):
 
 ```sh
 ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Signing: CI decodes `keystore/debug.keystore.b64` into `debug.keystore` at the
-repository root, which `app/build.gradle.kts` (`fixedDebug` config) uses
-directly — place that file yourself for local builds.
+### Release signing and migration
+
+Release APKs are signed with a new private key supplied through GitHub Actions
+secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_STORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+and `ANDROID_KEY_PASSWORD`. CI restores the keystore only in its temporary
+directory, verifies the APK certificate against
+`.github/android-signing-certificate.sha256`, and removes the temporary key.
+Never commit a keystore or its base64 encoding.
+
+The previous debug signing key was publicly exposed and must never be reused.
+Users of an APK signed with that key must uninstall it before installing the
+new release (this removes app data), then re-grant `WRITE_SECURE_SETTINGS`.
+Changing the key password or deleting the committed file does not repair the
+old key. Only install APKs from this repository's trusted release page.
+
+Pull requests build without private signing credentials. Trusted branch pushes
+build signed release artifacts; only `main` publishes a GitHub release.
+For an explicitly signed local release, set the four `ANDROID_*` variables
+above, replacing `ANDROID_KEYSTORE_BASE64` with `ANDROID_KEYSTORE_PATH`, and run
+`./gradlew :app:assembleRelease`. The file path must point outside this repository.
 
 ## File layout
 

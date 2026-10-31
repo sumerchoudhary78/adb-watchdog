@@ -41,15 +41,17 @@
   服务心跳 / 上次自动复活 / 恢复与失败计数
 - **双语文案**：中文 / English 切换，持久保存
 - **授权辅助**：未授权时显示 adb 命令，点击即复制；未授权时显示无障碍入口
-- **固定签名**：同签名构建可直接覆盖安装，授权不丢
+- **私有发行签名**：密钥保存在 GitHub Actions Secrets；本地调试使用独立的调试密钥
 
 ## 下载安装
 
 到 [Releases 最新发行版](../../releases/latest) 下载 `adb-watchdog-latest.apk` 安装。
 
-- **签名已固定**（证书 SHA-256 `778962e7efaaadbcf2b70f2208774626e304071f3c0b8bd520af7d20e3b21f70`），
-  每个发行说明里会打印本次 APK 的实际证书指纹，与本值一致即可**直接覆盖安装**
-- 首次从旧版（历史随机签名版）升级时需**卸载一次**，安装后重新授权
+- 新发行证书 SHA-256：
+  `71cabefdfb51c81a15e6f34c93390229d963242a1c1df35bafe885bc0feb8ca5`。
+  只有已经使用此新密钥的版本才可直接覆盖安装。
+- **所有旧签名版本（包括已泄露的固定调试密钥版本）**：先卸载旧版
+  （会清除应用数据），再安装新版并重新授权。旧公开密钥签名的 APK 不再可信。
 
 ## 一次性设置
 
@@ -99,8 +101,17 @@
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-签名：仓库根目录的 `debug.keystore` 由 CI 从 `keystore/debug.keystore.b64` 解码生成，
-`app/build.gradle.kts` 中的 `fixedDebug` 签名配置直接引用（本地构建需自行放置该文件）。
+### 发行签名与迁移
+
+发行 APK 使用新的私有密钥。GitHub Actions Secrets 保存
+`ANDROID_KEYSTORE_BASE64`、`ANDROID_STORE_PASSWORD`、`ANDROID_KEY_ALIAS`、
+`ANDROID_KEY_PASSWORD`。CI 仅在临时目录还原密钥，核对
+`.github/android-signing-certificate.sha256` 中的证书指纹，并清理临时密钥。
+禁止提交密钥或其 Base64 编码。Pull Request 构建不接触签名凭据。
+
+此前的调试私钥已公开，不能再使用；修改密码或删除仓库文件无法撤销泄露。
+已安装旧签名 APK 的用户需要先卸载旧版（会清除应用数据），安装新版后重新授予
+`WRITE_SECURE_SETTINGS`。仅从本仓库可信的发行页面下载安装包。
 
 ## 目录结构
 

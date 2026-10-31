@@ -3,9 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-// 固定签名：CI 会把 Secret 里的 keystore 写到仓库根目录的 debug.keystore。
-// 显式指定签名配置，避免 AGP 在 $HOME/.android 下自己生成随机 debug 钥匙。
-val fixedKeystore = rootProject.file(System.getenv("DEBUG_KEYSTORE_PATH") ?: "debug.keystore")
+// Local debug builds use Android's generated debug key. Release signing is
+// supplied only by the trusted CI build or an explicit local environment.
+val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
 
 android {
     namespace = "com.luffy.adbwatchdog"
@@ -15,26 +15,26 @@ android {
         applicationId = "com.luffy.adbwatchdog"
         minSdk = 30
         targetSdk = 34
-        versionCode = 15
-        versionName = "0.3.3"
+        versionCode = 16
+        versionName = "0.3.4"
     }
 
     signingConfigs {
-        create("fixedDebug") {
-            storeFile = fixedKeystore
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (releaseKeystorePath != null) {
+            create("privateRelease") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = requireNotNull(System.getenv("ANDROID_STORE_PASSWORD"))
+                keyAlias = requireNotNull(System.getenv("ANDROID_KEY_ALIAS"))
+                keyPassword = requireNotNull(System.getenv("ANDROID_KEY_PASSWORD"))
+            }
         }
     }
 
     buildTypes {
-        debug {
-            // debug.keystore 直接随仓库提交（仓库根目录），无条件使用它签名。
-            // 文件缺失时构建会立刻报错，而不是静默回退到随机 debug 钥匙。
-            signingConfig = signingConfigs.getByName("fixedDebug")
-        }
         release {
+            if (releaseKeystorePath != null) {
+                signingConfig = signingConfigs.getByName("privateRelease")
+            }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

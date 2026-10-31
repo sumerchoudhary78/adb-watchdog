@@ -29,3 +29,7 @@ Thumbs.db
 *.jks
 *.keystore
 keystore.properties
+
+# Encoded signing keys are secrets too
+*.keystore.b64
+*.jks.b64

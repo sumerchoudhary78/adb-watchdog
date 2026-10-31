@@ -1,26 +1,26 @@
 name: Build & Release APK
 
 on:
-  # 有新提交（push 到 main）就自动构建并重发 Release
   push:
-    branches: [ main ]
-  # 也允许在 Actions 页面手动触发
+    branches: [main, codex/private-release-signing]
+  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
-# 同一时间只跑一个构建，新提交会取消还在跑的旧构建
 concurrency:
-  group: release-apk
+  group: apk-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
-  build-release:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -29,89 +29,99 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # ubuntu-latest 自带 Android SDK（ANDROID_HOME 已设、许可已接受），
-      # AGP 8.5.2 + compileSdk 34 可直接构建
-
-      # 签名：keystore 以 base64 文本提交在 keystore/debug.keystore.b64
-      # （.gitignore 忽略了 *.keystore，直接传二进制文件会被静默跳过）。
-      - name: Decode signing keystore
+      - name: Build pull request without private signing credentials
+        if: github.event_name == 'pull_request'
         run: |
-          base64 -d keystore/debug.keystore.b64 > debug.keystore
-          echo "keystore size: $(wc -c < debug.keystore) bytes"
-          sha256sum debug.keystore
-
-      - name: Build debug APK
-        run: |
-          set -o pipefail
+          set -euo pipefail
           chmod +x gradlew
-          ./gradlew :app:assembleDebug --stacktrace --console=plain 2>&1 | tee build.log
+          ./gradlew :app:assembleRelease --stacktrace --console=plain
 
-      # 打印 APK 实际签名证书指纹，并写入发行说明（公开可核对）
-      - name: Verify APK signing certificate
+      - name: Build signed release APK
+        if: github.event_name != 'pull_request'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/adb-watchdog-release.jks
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
-          if [ -n "$APKSIGNER" ]; then
-            "$APKSIGNER" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | tee cert.txt | head -20
-            DIGEST=$(grep -i "SHA-256 digest" cert.txt | head -1 | sed 's/.*digest: //')
-            echo "CERT_DIGEST=${DIGEST}" >> "$GITHUB_ENV"
-          else
-            echo "apksigner not found, skipped"
+          set -euo pipefail
+          umask 077
+          trap 'rm -f "$ANDROID_KEYSTORE_PATH"' EXIT
+          test -n "$KEYSTORE_BASE64"
+          test -n "$ANDROID_STORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --stacktrace --console=plain
+
+      - name: Verify release certificate and non-debuggable APK
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/34.0.0"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" > cert.txt
+          cat cert.txt
+          EXPECTED=$(tr -d '[:space:]' < .github/android-signing-certificate.sha256)
+          ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' cert.txt)
+          test "$ACTUAL" = "$EXPECTED"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" > badging.txt
+          if grep -q '^application-debuggable' badging.txt; then
+            echo 'Refusing to distribute a debuggable APK' >&2
+            exit 1
           fi
-
-      # 编译/构建失败时，把完整日志原样打印到这一步的输出里
-      - name: Print full build log on failure
-        if: failure()
-        run: cat build.log
-
-      # 无论成败都留一份完整日志 artifact，随时可下载排查
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
-          if-no-files-found: ignore
-
-      - name: Prepare APK
-        run: |
-          VERSION=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/adb-watchdog-latest.apk
+          cp "$APK" dist/adb-watchdog-latest.apk
 
-      # 删除旧的 latest 发行版（连同 tag），失败（首次不存在）则忽略
-      - name: Delete previous release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+      - name: Remove any remaining temporary keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/adb-watchdog-release.jks"
 
-      # 以当前提交重新打 latest tag 并发行，资产直接挂 APK（不是 zip）
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          SHORT="${GITHUB_SHA::7}"
-          VERSION="${VERSION:-unknown}"
-          NOTES=$(cat <<EOF
-          自动构建：v$VERSION（commit $SHORT，$(date -u +'%Y-%m-%d %H:%M UTC')）
-          签名：固定 debug 签名
-          签名证书 SHA-256：${CERT_DIGEST:-unknown}
-
-          - 手机上已装同一签名版本：直接下载覆盖安装，数据与授权保留
-          - 若提示"签名不一致"（装机的是历史随机签名版）：卸载旧版后再安装，
-            安装后执行一次授权：
-            adb shell pm grant com.luffy.adbwatchdog android.permission.WRITE_SECURE_SETTINGS
-          EOF
-          )
-          gh release create latest dist/adb-watchdog-latest.apk \
-            --title "ADB Watchdog v$VERSION ($SHORT)" \
-            --notes "$NOTES"
-
-      # artifact 仅作排查留档，正式下载走 Release
-      - name: Upload artifact
+      - name: Upload verified signed APK
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: adb-watchdog-debug-apk
+          name: adb-watchdog-release-apk
           path: dist/adb-watchdog-latest.apk
           if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified signed APK
+        uses: actions/download-artifact@v4
+        with:
+          name: adb-watchdog-release-apk
+          path: dist
+
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="build-${GITHUB_SHA}"
+          cat > release-notes.md <<'EOF'
+          Signed release build using the new private signing key.
+          Certificate SHA-256: 71cabefdfb51c81a15e6f34c93390229d963242a1c1df35bafe885bc0feb8ca5
+
+          The old public debug signing key is compromised. If your installed
+          version uses the old key, uninstall it first (this removes app data),
+          install this release, and grant the permission again:
+          adb shell pm grant com.luffy.adbwatchdog android.permission.WRITE_SECURE_SETTINGS
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; leaving it unchanged."
+          else
+            gh release create "$TAG" dist/adb-watchdog-latest.apk \
+              --target "$GITHUB_SHA" --latest \
+              --title "ADB Watchdog (${GITHUB_SHA::7})" \
+              --notes-file release-notes.md
+          fi
