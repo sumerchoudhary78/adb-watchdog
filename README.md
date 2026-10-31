@@ -35,6 +35,7 @@ the Settings UI when that write is not honored.
 | v0.2.7 / v0.2.8 | Fixed signing: keystore committed as base64 and decoded in CI |
 | v0.2.9 | Event-driven recovery (network callback + settings observer) |
 | v0.3.0 ~ v0.3.3 | Conditional accessibility entry; "Wireless debugging settings" button; version in the title bar |
+| v0.3.4 | Replace the exposed debug signing key with private release signing and certificate verification |
 
 ## Features
 
