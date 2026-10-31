@@ -22,7 +22,7 @@
             android:id="@+id/enableSwitch"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Watchdog enabled"
+            android:text="@string/watchdog_enabled"
             android:layout_marginBottom="16dp" />
 
         <TextView
@@ -34,24 +34,39 @@
             android:layout_marginBottom="16dp" />
 
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnWirelessDebugging"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_wireless_settings"
+            android:layout_marginBottom="8dp" />
+
+        <!-- 仅在未授予 WRITE_SECURE_SETTINGS 时显示（无 adb 场景下的唯一恢复路径） -->
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnAccessibility"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Open Accessibility settings"
+            android:text="@string/btn_accessibility"
             android:layout_marginBottom="8dp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnBattery"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Disable battery optimization"
+            android:text="@string/btn_battery"
+            android:layout_marginBottom="8dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnNotifications"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_notifications"
             android:layout_marginBottom="8dp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnTest"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Test recovery now"
+            android:text="@string/btn_test"
             android:layout_marginBottom="16dp" />
 
         <TextView
@@ -61,5 +76,23 @@
             android:fontFamily="monospace"
             android:textIsSelectable="true"
             android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/grantCommand"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_command_copy"
+            android:fontFamily="monospace"
+            android:padding="12dp"
+            android:textSize="12sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnLanguage"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/btn_language" />
     </LinearLayout>
 </ScrollView>

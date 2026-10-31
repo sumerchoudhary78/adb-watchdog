@@ -3,6 +3,10 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Local debug builds use Android's generated debug key. Release signing is
+// supplied only by the trusted CI build or an explicit local environment.
+val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+
 android {
     namespace = "com.luffy.adbwatchdog"
     compileSdk = 34
@@ -11,12 +15,26 @@ android {
         applicationId = "com.luffy.adbwatchdog"
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 16
+        versionName = "0.3.4"
+    }
+
+    signingConfigs {
+        if (releaseKeystorePath != null) {
+            create("privateRelease") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = requireNotNull(System.getenv("ANDROID_STORE_PASSWORD"))
+                keyAlias = requireNotNull(System.getenv("ANDROID_KEY_ALIAS"))
+                keyPassword = requireNotNull(System.getenv("ANDROID_KEY_PASSWORD"))
+            }
+        }
     }
 
     buildTypes {
         release {
+            if (releaseKeystorePath != null) {
+                signingConfig = signingConfigs.getByName("privateRelease")
+            }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

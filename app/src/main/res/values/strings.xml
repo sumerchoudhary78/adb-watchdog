@@ -3,4 +3,57 @@
     <string name="app_name">ADB Watchdog</string>
     <string name="a11y_description">Re-enables wireless debugging via the Settings UI when the secure-settings flag is not honored.</string>
     <string name="a11y_summary">UI fallback recovery for wireless ADB</string>
+
+    <!-- Main screen -->
+    <string name="watchdog_enabled">Watchdog enabled</string>
+    <string name="btn_wireless_settings">Wireless debugging settings</string>
+    <string name="wd_hint">Wireless debugging lives in the lower part of Developer options — scroll down to find it.</string>
+    <string name="btn_accessibility">Open Accessibility settings</string>
+    <string name="btn_battery">Disable battery optimization</string>
+    <string name="btn_notifications">Notification settings</string>
+    <string name="btn_test">Test recovery now</string>
+    <string name="btn_language">中文 / English</string>
+
+    <!-- Status panel -->
+    <string name="status_wireless">Wireless ADB</string>
+    <string name="status_perm">WRITE_SECURE_SETTINGS</string>
+    <string name="status_a11y">AccessibilityService</string>
+    <string name="status_wifi">Wi-Fi</string>
+    <string name="status_endpoint">Wireless ADB address</string>
+    <string name="status_notif">Notifications</string>
+    <string name="status_heartbeat">Service heartbeat</string>
+    <string name="status_revive">Last auto-revive</string>
+    <string name="status_counters">Recoveries / failures</string>
+
+    <string name="val_on">ON</string>
+    <string name="val_off">OFF</string>
+    <string name="val_searching">searching...</string>
+    <string name="val_allowed">allowed</string>
+    <string name="val_denied">not allowed</string>
+    <string name="val_never">never</string>
+    <string name="hb_seconds_fmt">%1$d s ago</string>
+    <string name="hb_stale_fmt">%1$d s ago (may have been killed)</string>
+    <string name="minutes_fmt">%1$d min ago</string>
+    <string name="val_granted">granted</string>
+    <string name="val_not_granted">NOT granted</string>
+    <string name="val_bound">bound</string>
+    <string name="val_not_bound">not bound</string>
+    <string name="val_connected">connected</string>
+    <string name="val_disconnected">disconnected</string>
+
+    <string name="manual_recover_fmt">manual recover -> %1$s</string>
+
+    <!-- Grant hint -->
+    <string name="hint_granted">Secure-settings path is active — recovery should be instant.</string>
+    <string name="hint_not_granted">Not granted yet. Run on your PC once (USB ADB or any active ADB session) — tap the command below to copy it. Afterwards recovery is instant and silent.</string>
+    <string name="grant_cmd_fmt">adb shell pm grant %1$s android.permission.WRITE_SECURE_SETTINGS</string>
+    <string name="copy_toast_ok">Copied to clipboard</string>
+
+    <!-- Notification -->
+    <string name="notif_channel_name">ADB Watchdog</string>
+    <string name="notif_starting">Wireless ADB: starting</string>
+    <string name="notif_up">Wireless ADB: up</string>
+    <string name="notif_down">Wireless ADB: down</string>
+    <string name="notif_recovering">Wireless ADB: recovering</string>
+    <string name="notif_paused_no_wifi">Wireless ADB: paused (no Wi-Fi)</string>
 </resources>

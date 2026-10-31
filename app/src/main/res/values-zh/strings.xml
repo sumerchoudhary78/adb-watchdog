@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ADB 看门狗</string>
+    <string name="a11y_description">当安全设置标志未被系统接受时，通过设置界面自动重新打开无线调试。</string>
+    <string name="a11y_summary">无线调试的界面兜底恢复</string>
+
+    <!-- 主界面 -->
+    <string name="watchdog_enabled">看门狗开关</string>
+    <string name="btn_wireless_settings">打开无线调试设置</string>
+    <string name="wd_hint">「无线调试」在开发者选项页面的下方，向下滑动查找即可。</string>
+    <string name="btn_accessibility">打开无障碍设置</string>
+    <string name="btn_battery">关闭电池优化</string>
+    <string name="btn_notifications">通知设置</string>
+    <string name="btn_test">立即测试恢复</string>
+    <string name="btn_language">中文 / English</string>
+
+    <!-- 状态面板 -->
+    <string name="status_wireless">无线调试</string>
+    <string name="status_perm">安全设置权限</string>
+    <string name="status_a11y">无障碍服务</string>
+    <string name="status_wifi">Wi-Fi</string>
+    <string name="status_endpoint">无线调试地址</string>
+    <string name="status_notif">通知权限</string>
+    <string name="status_heartbeat">服务心跳</string>
+    <string name="status_revive">上次自动复活</string>
+    <string name="status_counters">恢复 / 失败</string>
+
+    <string name="val_on">开</string>
+    <string name="val_off">关</string>
+    <string name="val_searching">发现中...</string>
+    <string name="val_allowed">已允许</string>
+    <string name="val_denied">未允许</string>
+    <string name="val_never">从未</string>
+    <string name="hb_seconds_fmt">%1$d 秒前</string>
+    <string name="hb_stale_fmt">%1$d 秒前（可能已被系统杀掉）</string>
+    <string name="minutes_fmt">%1$d 分钟前</string>
+    <string name="val_granted">已授权</string>
+    <string name="val_not_granted">未授权</string>
+    <string name="val_bound">已绑定</string>
+    <string name="val_not_bound">未绑定</string>
+    <string name="val_connected">已连接</string>
+    <string name="val_disconnected">未连接</string>
+
+    <string name="manual_recover_fmt">手动恢复 -> %1$s</string>
+
+    <!-- 授权提示 -->
+    <string name="hint_granted">安全设置通道已激活，恢复应为瞬时完成。</string>
+    <string name="hint_not_granted">尚未授权。请在电脑上执行一次（USB ADB 或任意可用的 ADB 会话）——点击下方命令即可复制。之后看门狗即可瞬时、无感地恢复无线调试。</string>
+    <string name="grant_cmd_fmt">adb shell pm grant %1$s android.permission.WRITE_SECURE_SETTINGS</string>
+    <string name="copy_toast_ok">已复制到剪贴板</string>
+
+    <!-- 通知 -->
+    <string name="notif_channel_name">ADB 看门狗</string>
+    <string name="notif_starting">无线调试：启动中</string>
+    <string name="notif_up">无线调试：运行中</string>
+    <string name="notif_down">无线调试：已关闭</string>
+    <string name="notif_recovering">无线调试：恢复中</string>
+    <string name="notif_paused_no_wifi">无线调试：已暂停（无 Wi-Fi）</string>
+</resources>
